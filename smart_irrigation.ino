@@ -1,5 +1,5 @@
+#include <DHT.h>
 #include <Bounce2.h>
-
 #include <SimpleTimer.h>
 // You could use a spare Hardware Serial on boards that have it (like Mega)
 #include <SoftwareSerial.h>
@@ -7,79 +7,110 @@ SoftwareSerial SwSerial(2, 3); // RX, TX
 #define BLYNK_PRINT SwSerial
 #include <BlynkSimpleSerial.h>
 
-char auth[] = "53834e9ebf3942ad95d533a4547efe3f";
+#define DHTTYPE DHT11
 
-#define moisturePin A5
+//Blynk Auth
+char auth[] = "token";
 
-// door 1 sensor and control
-const int selePin = 13;
-const int seleStatusPin = 3;
+//Pin Mapping
+const int moisturePin = A5; //Pin for mouisture sensor
+const int dhtPin = 2; //Pin; for DHT11/DHT22
+const int lightSensorPin = A0; //Pin for Light Sensor / LDR
+const int selenoidPin = 13; //Pin for Selenoid
+const int selenoidSwitchPin = 3; //Pin for Selenoid Switch
 
-// door 1 status
-int selePinStatus = 0;
-int seleLedStatus = 0;
+//
 int moistureStatus;
-bool seleSwitch = false;
-bool seleBypass = false;
+int selenoidLedStatus;
+int lightSensorValue;
+float humidity;
+float temperature;
+float heatIndex;
 
-SimpleTimer timer;
-Bounce  Bouncer  = Bounce();
+bool seleSwitch = false; //starting condition for selenoid switch status
+bool seleBypass = false; //starting condition for bypass status
+
+SimpleTimer timer; //timer initiate
+Bounce  bouncerSelenoid  = Bounce(); //bouncher initiate
+DHT dht(dhtPin, DHTTYPE); //DHT initiate
 
 void setup()
 {
   SwSerial.begin(9600);
-  Blynk.begin(auth);
+  Blynk.begin(auth); //Blynk Server Load
 
-
-  pinMode(selePin, OUTPUT);
+  //Pin Mode Initiate
+  pinMode(selenoidPin, OUTPUT);
+  pinMode(lightSensorPin, OUTPUT);
   pinMode(moisturePin, INPUT);
-  pinMode(seleStatusPin, INPUT);
+  pinMode(selenoidSwitchPin, INPUT);
 
-  Bouncer.attach( seleStatusPin );
-  Bouncer.interval(5);
+  digitalWrite(selenoidSwitchPin, LOW);
 
-  timer.setInterval(1000L, sendSeleStatus);
+  //Make Bouncher for Selenoid switch
+  bouncerSelenoid.attach( selenoidSwitchPin );
+  bouncerSelenoid.interval(5);
+
+  dht.begin(); //begin DHT
+  
+  //Pooling timer for Blynk Server
+  timer.setInterval(1000L, sendSelenoidStatus);
+  timer.setInterval(5000L, checkDHTValue);
+  
 
 }
 
-void sendSeleStatus() {
-  Blynk.virtualWrite(V5, seleLedStatus);
+void checkDHTValue(){
+  temperature = dht.readTemperature();
+  humidity = dht.readHumidity();
+  heatIndex = dht.computeHeatIndex(temperature, humidity, false);
+
+  Blynk.virtualWrite(V10, temperature);
+  Blynk.virtualWrite(V11, humidity);
+  Blynk.virtualWrite(V12, heatIndex);
+  Blynk.virtualWrite(V9, lightSensorValue);
+  Blynk.virtualWrite(V8, moistureStatus);
+  
+}
+
+void sendSelenoidStatus() {
+  Blynk.virtualWrite(V5, selenoidLedStatus);
 }
 
 void loop() {
   Blynk.run();
-
+  
   moistureStatus = analogRead(moisturePin);
-  //moistureStatus = digitalRead(moisturePin);
-  //selePinStatus = digitalRead(seleStatusPin);
-
-
-  if ( Bouncer.update() ) {
-    if ( Bouncer.read() == HIGH) {
+  lightSensorValue = analogRead(lightSensorPin);
+  
+  //Bypass Switch for Selenoid Switch
+  if ( bouncerSelenoid.update() ) {
+    if ( bouncerSelenoid.read() == HIGH) {
       if (seleSwitch) {
-        seleLedStatus = 0;
-        digitalWrite(selePin, LOW);
+        selenoidLedStatus = 0;
+        digitalWrite(selenoidPin, LOW);
         seleBypass = false;
         seleSwitch = false;
       }
       else {
-        seleLedStatus = 1023; // 100% brightness
-        digitalWrite(selePin, HIGH);
+        selenoidLedStatus = 1023; // 100% brightness
+        digitalWrite(selenoidPin, HIGH);
         seleBypass = true;
         seleSwitch = true;
       }
     }
   }
 
+  //Routin Moisture sensor checking
   if (!seleBypass) {
     if (moistureStatus > 100) {
-      seleLedStatus = 1023;
-      digitalWrite(selePin, HIGH);
+      selenoidLedStatus = 1023;
+      digitalWrite(selenoidPin, HIGH);
 
     }
     else {
-      seleLedStatus = 0;
-      digitalWrite(selePin, LOW);
+      selenoidLedStatus = 0;
+      digitalWrite(selenoidPin, LOW);
     }
 
   }
